@@ -4,12 +4,15 @@
  */
 package com.umg.api.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  *
  * @author adrir
  */
 public class cliente {
     
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
     private int id;
     private String nombre;
     private String apellido;

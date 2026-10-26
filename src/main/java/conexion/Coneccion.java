@@ -1,30 +1,16 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package conexion;
-import java.sql.*;
-/**
- *
- * @author adrir
- */
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+/** Conexión heredada opcional; el cliente JavaFX normal utiliza la API REST. */
 public class Coneccion {
-    
-    private static String URL="jdbc:postgresql://ep-lingering-night-aukh27yr-pooler.c-10.us-east-1.aws.neon.tech:5432/neondb?sslmode=require";
-    private static String user="neondb_owner";
-    private static String password="npg_zUgWJZp17wHk";
-    
-    public static Connection CreateConnection(){
-    
-        try{
-        
-            Connection con = DriverManager.getConnection(URL, user, password);
-            System.out.println("se conecto");
-            return con;
-            
-        }catch(SQLException e){
-        e.printStackTrace();
-        return null;
-        }
+    public static Connection CreateConnection() {
+        String url=System.getenv("LEGACY_JDBC_URL");
+        String user=System.getenv("LEGACY_JDBC_USER");
+        String password=System.getenv("LEGACY_JDBC_PASSWORD");
+        if(url==null || user==null || password==null)
+            throw new IllegalStateException("La conexión JDBC heredada no está configurada. Usa el cliente JavaFX con la API.");
+        try { return DriverManager.getConnection(url,user,password); }
+        catch(SQLException ex) { throw new IllegalStateException("No se pudo abrir la conexión JDBC heredada.",ex); }
     }
 }

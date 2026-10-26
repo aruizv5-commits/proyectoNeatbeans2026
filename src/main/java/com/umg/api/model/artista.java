@@ -4,12 +4,15 @@
  */
 package com.umg.api.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  *
  * @author adrir
  */
 public class artista {
    
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
     private int id_artista;
     private String nombre_artistico;
     private String genero_musical;
