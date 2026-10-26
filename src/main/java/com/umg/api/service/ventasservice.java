@@ -4,6 +4,8 @@
  */
 package com.umg.api.service;
 
+import com.umg.api.config.ApiConfig;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,7 +33,7 @@ import java.util.List;
 public class ventasservice {
     
      private static final String BASE_URL =
-            "no hay nada";
+            ApiConfig.url("ventas");
 
     private static final ObjectMapper mapper = new ObjectMapper()
             .configure(
@@ -44,7 +46,7 @@ public class ventasservice {
     // ==========================================================
     public List<ventas> getVentas() throws Exception {
 
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
+        try (CloseableHttpClient client = ApiConfig.crearCliente()) {
 
             HttpGet request = new HttpGet(BASE_URL+"/");
 
@@ -73,7 +75,7 @@ public class ventasservice {
         
         
 
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
+        try (CloseableHttpClient client = ApiConfig.crearCliente()) {
 
             HttpPost request = new HttpPost(BASE_URL + "/create");
 
@@ -105,7 +107,7 @@ public class ventasservice {
     // ==========================================================
     public ventas updateVentas(int id_venta, ventas v) throws Exception {
 
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
+        try (CloseableHttpClient client = ApiConfig.crearCliente()) {
 
             HttpPut request = new HttpPut(BASE_URL + "/update/" + id_venta);
 
@@ -137,7 +139,7 @@ public class ventasservice {
     // ==========================================================
     public void deleteVentas(int id_venta) throws Exception {
 
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
+        try (CloseableHttpClient client = ApiConfig.crearCliente()) {
 
             HttpDelete request = new HttpDelete(BASE_URL + "/delete/" + id_venta);
 

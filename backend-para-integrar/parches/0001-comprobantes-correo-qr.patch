@@ -1,0 +1,1289 @@
+From 78cf216715c8c077561011abe03ed4a226c6c37c Mon Sep 17 00:00:00 2001
+From: Codex <codex@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 01:32:59 +0000
+Subject: [PATCH] Integrate receipt PDF email and signed ticket pages without
+ repeating sales
+
+---
+ .../controller/detalle_ventas.controller.js   | 118 +----
+ .../controller/ventas.controller.js           |  13 +-
+ .../service/comprobantes.instance.js          |  17 +
+ .../service/comprobantes.js                   | 148 ++++++
+ .../service/correo-gmail.js                   |  19 +
+ package-lock.json                             | 500 +++++++++++++++++-
+ package.json                                  |  12 +-
+ server.js                                     |   6 +
+ test/comprobantes.test.cjs                    |  29 +
+ test/correo-gmail.test.cjs                    |  23 +
+ test/ventas-controller.test.cjs               |  38 ++
+ 11 files changed, 823 insertions(+), 100 deletions(-)
+ create mode 100644 Proyecto_final_progra2/service/comprobantes.instance.js
+ create mode 100644 Proyecto_final_progra2/service/comprobantes.js
+ create mode 100644 Proyecto_final_progra2/service/correo-gmail.js
+ create mode 100644 test/comprobantes.test.cjs
+ create mode 100644 test/correo-gmail.test.cjs
+ create mode 100644 test/ventas-controller.test.cjs
+
+diff --git a/Proyecto_final_progra2/controller/detalle_ventas.controller.js b/Proyecto_final_progra2/controller/detalle_ventas.controller.js
+index 84fa8a2..eff5b11 100644
+--- a/Proyecto_final_progra2/controller/detalle_ventas.controller.js
++++ b/Proyecto_final_progra2/controller/detalle_ventas.controller.js
+@@ -1,41 +1,14 @@
+-// importamos db los modelos en este caso si tenemos uno o mas, se puede referenciar db."nombreModelo".   
+ const db = require("../models");
+-const transporter = require("../config/mailer");
+-const nodemailer = require('nodemailer');
+-const { google } = require("googleapis");
+-const OAuth2 = google.auth.OAuth2;
+ const Detalle_ventas = db.d_ventas;
+ const Op = db.Sequelize.Op;
++const obtenerComprobantes = require("../service/comprobantes.instance");
+ 
+-
+-const accountTransport = require("../config/account_transport.json");
+-
+-
+-
+-const _SERVER = "http://localhost:8081"; 
+-const _ID_APP_1 = 1;                      
+-const head = "<div style='background:#333;color:#fff;padding:10px;'>Encabezado</div>";                          
+-const footer = "<div style='font-size:12px;color:#777;'>Pie de página</div>";
+-
+-const mail_rover = async (callback) => {
+-    const oauth2Client = new OAuth2(
+-        accountTransport.auth.clientId,
+-        accountTransport.auth.clientSecret,
+-        "https://developers.google.com/oauthplayground",
+-    );
+-    oauth2Client.setCredentials({
+-        refresh_token: accountTransport.auth.refreshToken,
+-        tls: {
+-            rejectUnauthorized: false
+-        }
+-    });
+-    oauth2Client.getAccessToken((err, token) => {
+-        if (err)
+-            return console.log(err);;
+-        accountTransport.auth.accessToken = token;
+-        callback(nodemailer.createTransport(accountTransport));
+-    });
+-};
++function conQr(detalle) {
++    if (!detalle) return null;
++    const dato = typeof detalle.toJSON === "function" ? detalle.toJSON() : detalle;
++    try { return { ...dato, qr_url: obtenerComprobantes().enlace(dato) }; }
++    catch { return { ...dato, qr_url: null }; }
++}
+ 
+ // Create and Save a new Client
+ exports.create = async (req, res) => {
+@@ -46,7 +19,7 @@ exports.create = async (req, res) => {
+         });
+         return;
+     }
+-//otras cosas que no me recuerdo bien pero son importantes
++// Recuperar registros asociados antes de procesar la venta.
+     const ventaID = await db.ventas.findByPk(req.body.id_venta);
+     const clienteID = await db.cliente.findByPk(req.body.id_cliente);
+     const Ventaexiste = await Detalle_ventas.findOne({where:{id_venta: req.body.id_venta}})
+@@ -85,6 +58,11 @@ exports.create = async (req, res) => {
+     }
+ 
+ 
++    if (id_inventarios.some(id => !Number.isSafeInteger(id) || id < 1)
++            || new Set(id_inventarios).size !== id_inventarios.length) {
++        return res.status(400).send({ message: "Los boletos deben tener identificadores válidos y no repetidos." });
++    }
++
+     const ids_inventarios = id_inventarios;
+     let detallesAInsertar = [];
+     let Totalgeneral=0;
+@@ -161,7 +139,7 @@ detallesAInsertar.push({
+             const nuevoStock = item.inventarioModel.cantidad_disponible - 1;
+             await item.inventarioModel.update({ cantidad_disponible: nuevoStock });
+ 
+-            const inventariosRestantes = await db.inventario_boletos.count({
++            const inventariosRestantes = await db.i_boletos.count({
+                 where: {
+                     id_concierto: item.conciertoModel.id_concierto,
+                     cantidad_disponible: { [Op.gt]: 0 } 
+@@ -177,59 +155,19 @@ detallesAInsertar.push({
+ 
+         await ventaID.update({total_venta:Nuevototal});
+ 
+-        //envia el piche correo
+-       if (clienteID && clienteID.correo) {
+-            
+-            // Llamamos a tu función mail_rover pasándole el transporter
+-            mail_rover(1, async (transporterConfig) => {
+-                
+-                // Aquí defines el ID de la app o de la configuración que necesites (ej: _ID_APP_1)
+-                const idAppConfig = _ID_APP_1; 
+-
+-                // Si tu mail_rover espera recibir el id o ya lo maneja internamente:
+-                // (Adaptado a la estructura JSON que regresa tu switch)
+-                const jsonConfig = {
+-                    url: _SERVER + 'check/', 
+-                    mail: transporterConfig, 
+-                    app: 'CHECK', 
+-                    from: 'Check <check@planck.biz>',
+-                    to: clienteID.correo, // 👈 IMPORTANTE: Aquí va el correo dinámico del cliente que compró
+-                    slogan: '😋 Comida exquisita, entregas simples. 🛵 Compra YA! 👇🏻',
+-                    body_bienvanida: 'Mensaje personalizado', 
+-                    head_bienvanida: 'En Check pide a tu local favorito, o chatea con un asesor por medicina, y te lo llevamos lo antes posible.',
+-                    bcc: 'Info <planck.biz@gmail.com>', 
+-                    head: typeof head !== 'undefined' ? head : '', 
+-                    footer: typeof footer !== 'undefined' ? footer : ''
+-                };
+-
+-                const mailOptions = {
+-                    from: jsonConfig.from,
+-                    to: jsonConfig.to,
+-                    bcc: jsonConfig.bcc,
+-                    subject: "¡Confirmación de compra de boletos!",
+-                    html: `
+-                        <h2>¡Gracias por tu compra, ${clienteID.nombre || 'Cliente'}!</h2>
+-                        <p>${jsonConfig.head_bienvanida}</p>
+-                        <p>Tu transacción se ha procesado con éxito en nuestro sistema.</p>
+-                        <p><b>Número de Venta:</b> #${ventaID.id_venta}</p>
+-                        <p><b>Total General:</b> $${Totalgeneral}</p>
+-                        <br>
+-                        <p><i>${jsonConfig.slogan}</i></p>
+-                        <p>¡Te esperamos en el evento!</p>
+-                    `
+-                };
+-
+-                try {
+-                    await jsonConfig.mail.sendMail(mailOptions);
+-                    console.log("Correo de confirmación enviado exitosamente mediante mail_rover.");
+-                } catch (mailErr) {
+-                    console.error("No se pudo enviar el correo con mail_rover, pero la venta se registró:", mailErr);
+-                }
+-            });
++        // Un fallo de correo no debe convertir una venta guardada en un error de cobro.
++        let correoEstado = "pendiente";
++        try {
++            await obtenerComprobantes().enviar(ventaID.id_venta);
++            correoEstado = "aceptado";
++        } catch {
++            console.error("Comprobante pendiente para venta", ventaID.id_venta,
++                ": revisar configuración de correo. No repetir el cobro.");
+         }
+-
+-    //aqui termina la operacion para el pinche correo y sigue las demas babosadas
+-   return res.status(201).send(resultados);
++        res.set("X-Comprobante-Correo", correoEstado);
++        return res.status(201).send(resultados.map(d => ({
++            ...conQr(d), comprobante_correo: correoEstado
++        })));
+ 
+     } catch (err) {
+         return res.status(500).send({
+@@ -246,7 +184,7 @@ exports.findAll = (req, res) => {
+ 
+     Detalle_ventas.findAll({ where: condition })
+         .then(data => {
+-            res.send(data);
++            res.send(data.map(conQr));
+         })
+         .catch(err => {
+             res.status(500).send({
+@@ -262,7 +200,7 @@ exports.findOne = (req, res) => {
+ 
+     Detalle_ventas.findByPk(id)
+         .then(data => {
+-            res.send(data);
++            res.send(conQr(data));
+         })
+         .catch(err => {
+             res.status(500).send({
+diff --git a/Proyecto_final_progra2/controller/ventas.controller.js b/Proyecto_final_progra2/controller/ventas.controller.js
+index b9d052a..e8f1ebb 100644
+--- a/Proyecto_final_progra2/controller/ventas.controller.js
++++ b/Proyecto_final_progra2/controller/ventas.controller.js
+@@ -65,8 +65,17 @@ exports.findOne = (req, res) => {
+     const id = req.params.id;
+ 
+     Ventas.findByPk(id)
+-        .then(data => {
+-            res.send(data);
++        .then(async data => {
++            if (!data) return res.send(null);
++            const vendedor = await db.usuario.findByPk(data.id_vendedor, {
++                attributes: ["nombre_completo", "nombre_usuario"]
++            });
++            return res.send({
++                ...data.toJSON(),
++                vendedor_nombre: vendedor
++                    ? (vendedor.nombre_completo || vendedor.nombre_usuario)
++                    : `Vendedor #${data.id_vendedor}`
++            });
+         })
+         .catch(err => {
+             res.status(500).send({
+diff --git a/Proyecto_final_progra2/service/comprobantes.instance.js b/Proyecto_final_progra2/service/comprobantes.instance.js
+new file mode 100644
+index 0000000..dfb3176
+--- /dev/null
++++ b/Proyecto_final_progra2/service/comprobantes.instance.js
+@@ -0,0 +1,17 @@
++// Ubicación: Proyecto_final_progra2/service/comprobantes.instance.js
++let instancia;
++module.exports = function obtenerComprobantes() {
++  if (!instancia) {
++    const crear = require('./comprobantes');
++    instancia = crear({
++      db: require('../models'),
++      secret: process.env.BOLETOS_QR_SECRET,
++      baseUrl: process.env.PUBLIC_BASE_URL || 'https://proyectoapi2026.onrender.com',
++      from: process.env.MAIL_FROM,
++      transporter: {
++        sendMail: mensaje => require('./correo-gmail')().sendMail(mensaje)
++      }
++    });
++  }
++  return instancia;
++};
+diff --git a/Proyecto_final_progra2/service/comprobantes.js b/Proyecto_final_progra2/service/comprobantes.js
+new file mode 100644
+index 0000000..7cf6afc
+--- /dev/null
++++ b/Proyecto_final_progra2/service/comprobantes.js
+@@ -0,0 +1,148 @@
++// Archivo nuevo: Proyecto_final_progra2/service/comprobantes.js
++const crypto = require('node:crypto');
++const PDFDocument = require('pdfkit');
++const QRCode = require('qrcode');
++
++module.exports = function crearComprobantes({ db, secret, baseUrl, transporter, from }) {
++  if (!secret || Buffer.byteLength(secret) < 32) throw new Error('BOLETOS_QR_SECRET debe tener al menos 32 bytes.');
++  const base = new URL(baseUrl);
++  if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash)
++    throw new Error('PUBLIC_BASE_URL debe ser una dirección HTTPS pública.');
++  const origen = base.origin;
++  const escapar = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
++  const dinero = v => {
++    const n = Number(v);
++    if (v == null || !Number.isFinite(n) || n < 0) throw new Error('Importe inválido.');
++    return Math.round(n * 100);
++  };
++  const quetzales = centavos => 'Q' + (centavos / 100).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
++  const fechaVenta = v => new Intl.DateTimeFormat('es-GT', {timeZone:'America/Guatemala',dateStyle:'long',timeStyle:'short'}).format(new Date(v));
++  const fechaEvento = v => {
++    const s = String(v instanceof Date ? v.toISOString() : v).slice(0, 10);
++    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return 'Fecha no disponible';
++    return s.split('-').reverse().join('/');
++  };
++  const firma = texto => crypto.createHmac('sha256', secret).update(texto).digest('base64url');
++  function enlace(detalle) {
++    const id = Number(detalle.id_detalle);
++    if (!Number.isSafeInteger(id) || id < 1) throw new Error('Detalle inválido.');
++    const payload = Buffer.from(JSON.stringify({version:1,detalle:id})).toString('base64url');
++    return origen + '/api/boletos/ver/' + payload + '.' + firma(payload);
++  }
++  function verificar(token) {
++    if (typeof token !== 'string' || token.length > 500) throw new Error('QR inválido.');
++    const partes = token.split('.');
++    if (partes.length !== 2) throw new Error('QR inválido.');
++    const [payload, valor] = partes;
++    if (!/^[A-Za-z0-9_-]+$/.test(payload) || !/^[A-Za-z0-9_-]{43}$/.test(valor)) throw new Error('QR inválido.');
++    const esperado = Buffer.from(firma(payload));
++    const recibido = Buffer.from(valor);
++    if (esperado.length !== recibido.length || !crypto.timingSafeEqual(esperado, recibido)) throw new Error('QR inválido.');
++    const datos = JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));
++    if (datos.version !== 1 || !Number.isSafeInteger(datos.detalle) || datos.detalle < 1) throw new Error('QR inválido.');
++    return datos.detalle;
++  }
++  async function uno(modelo, id, opciones) {
++    const dato = await modelo.findByPk(id, opciones);
++    if (!dato) throw new Error('Falta un registro asociado al boleto.');
++    return dato;
++  }
++  async function linea(d) {
++    const inv = await uno(db.i_boletos,d.id_inventario);
++    const evento = await uno(db.concierto,inv.id_concierto);
++    const localidad = await uno(db.localidades,inv.id_localidad);
++    const cantidad = Number(d.cantidad);
++    if (cantidad !== 1) throw new Error('Esta API vende un asiento por detalle; revisa la cantidad.');
++    const precio = dinero(d.precio_unitario), subtotal = dinero(d.subtotal);
++    if (precio !== subtotal) throw new Error('Detalle inconsistente.');
++    return {id:Number(d.id_detalle),evento:evento.titulo_evento,fecha:fechaEvento(evento.fecha_concierto),
++      recinto:evento.recinto,tipo:localidad.nombre,asiento:d.asiento || localidad.asiento,
++      cantidad,precio,subtotal,qr_url:enlace(d)};
++  }
++  async function datosVenta(id) {
++    const venta = await uno(db.ventas,id);
++    const detalles = await db.d_ventas.findAll({where:{id_venta:id},order:[['id_detalle','ASC']]});
++    if (!detalles.length) throw new Error('La venta no tiene detalles.');
++    const clientes = new Set(detalles.map(d => Number(d.id_cliente)));
++    if (clientes.size !== 1) throw new Error('La venta no tiene un cliente único.');
++    const cliente = await uno(db.cliente,[...clientes][0],{attributes:['id','nombre','apellido','correo','telefono']});
++    const vendedor = await uno(db.usuario,venta.id_vendedor,{attributes:['id_usuario','nombre_completo','nombre_usuario']});
++    const lineas = await Promise.all(detalles.map(linea));
++    const total = dinero(venta.total_venta);
++    if (lineas.reduce((s,l) => s+l.subtotal,0) !== total) throw new Error('El total no coincide con sus detalles.');
++    return {numero:Number(venta.id_venta),fecha:fechaVenta(venta.fecha_venta),
++      cliente:[cliente.nombre,cliente.apellido].filter(Boolean).join(' '),telefono:cliente.telefono,
++      correo:cliente.correo,vendedor:vendedor.nombre_completo || vendedor.nombre_usuario,
++      observaciones:'Precios finales registrados en la venta.',lineas,total};
++  }
++  function html(d) {
++    return `<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Comprobante ${d.numero}</title></head>
++    <body style="font-family:Arial,sans-serif;color:#142438;background:#f0f5f8;padding:24px"><main style="max-width:760px;margin:auto;background:white;padding:28px;border-radius:14px">
++    <h1>Comprobante de venta #${d.numero}</h1><p><b>Fecha de venta:</b> ${escapar(d.fecha)}</p>
++    <p><b>Vendedor:</b> ${escapar(d.vendedor)}</p><p><b>Cliente:</b> ${escapar(d.cliente)}<br><b>Teléfono:</b> ${escapar(d.telefono)}</p>
++    <table cellpadding="9" style="width:100%;border-collapse:collapse"><tr style="background:#e7eef3"><th>Evento</th><th>Entrada</th><th>Cant.</th><th>Precio</th><th>Total</th></tr>
++    ${d.lineas.map(l=>`<tr><td>${escapar(l.evento)}</td><td>${escapar(l.tipo)} ${escapar(l.asiento)}</td><td>${l.cantidad}</td><td>${quetzales(l.precio)}</td><td>${quetzales(l.subtotal)}</td></tr>`).join('')}</table>
++    <h2>Total pagado: ${quetzales(d.total)}</h2><p>Cantidad de boletos: ${d.lineas.length}</p><p><b>Observaciones:</b> ${escapar(d.observaciones)}</p>
++    <p>Se adjunta tu comprobante y los boletos con QR en PDF. Documento académico, no fiscal.</p></main></body></html>`;
++  }
++  async function pdf(d) {
++    const imagenes = await Promise.all(d.lineas.map(l => QRCode.toBuffer(l.qr_url,{type:'png',width:360,margin:4})));
++    return new Promise((resolve,reject)=> {
++      const doc = new PDFDocument({size:'A4',margin:40});
++      const chunks=[];doc.on('data',b=>chunks.push(b));doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.on('error',reject);
++      const cabecera = titulo => {
++        doc.rect(40,35,515,80).fill('#142438');doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(21).text(titulo,58,61,{width:480});
++        doc.fillColor('#142438').font('Helvetica').fontSize(11);doc.y=140;
++      };
++      const espacio = h => {if(doc.y+h>745){doc.addPage();cabecera('Comprobante · continuación');}};
++      cabecera('Comprobante de venta #' + d.numero);
++      doc.text('Fecha de venta: '+d.fecha).moveDown(0.6);
++      doc.text('Vendedor: '+d.vendedor).moveDown(0.6);
++      doc.text('Cliente: '+d.cliente).moveDown(0.6);
++      doc.text('Teléfono: '+d.telefono).moveDown();
++      for (const l of d.lineas) {
++        espacio(135);doc.font('Helvetica-Bold').text(l.evento,{width:500});doc.font('Helvetica');
++        doc.text('Tipo de entrada: '+l.tipo+' · Asiento: '+l.asiento,{width:500});
++        doc.text('Cantidad: '+l.cantidad+' · Precio por boleto: '+quetzales(l.precio)+' · Subtotal: '+quetzales(l.subtotal),{width:500}).moveDown();
++      }
++      espacio(130);doc.font('Helvetica-Bold').fontSize(18).text('Total pagado: '+quetzales(d.total));
++      doc.font('Helvetica').fontSize(11).text('Cantidad de boletos: '+d.lineas.length).moveDown();
++      doc.text('Observaciones: '+d.observaciones,{width:500});
++      d.lineas.forEach((l,i)=> {
++        doc.addPage();cabecera('Boleto · '+l.evento);
++        doc.font('Helvetica-Bold').fontSize(16).text(l.evento,{width:500});doc.font('Helvetica').fontSize(12).moveDown();
++        doc.text('Fecha del evento: '+l.fecha).text('Recinto: '+l.recinto).moveDown();
++        doc.text('Entrada: '+l.tipo+' · Asiento: '+l.asiento).text('Precio por boleto: '+quetzales(l.precio));
++        doc.image(imagenes[i],180,330,{width:230});
++        doc.fontSize(10).text('Escanea el QR para consultar el boleto registrado.',40,590,{width:515,align:'center'});
++        doc.text('La consulta no registra el ingreso al evento.',40,610,{width:515,align:'center'});
++      });
++      doc.end();
++    });
++  }
++  async function enviar(id) {
++    if (!transporter || !from) throw new Error('Falta configurar el remitente del correo.');
++    const d = await datosVenta(id);
++    if (typeof d.correo !== 'string' || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(d.correo)) throw new Error('El cliente no tiene un correo válido.');
++    const adjunto = await pdf(d);
++    const resultado = await transporter.sendMail({from,to:d.correo,subject:'Comprobante de venta #'+d.numero,
++      text:'Comprobante de venta #'+d.numero+'. Total pagado: '+quetzales(d.total)+'. Consulta el PDF adjunto.',html:html(d),
++      attachments:[{filename:'comprobante-venta-'+d.numero+'.pdf',content:adjunto,contentType:'application/pdf'}]});
++    if (!resultado.accepted || !resultado.accepted.length) throw new Error('El servidor de correo no aceptó el destinatario.');
++    return {estado:'aceptado',messageId:resultado.messageId};
++  }
++  function registrar(app) {
++    app.get('/api/boletos/ver/:token',async(req,res)=> {
++      res.set({'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff',
++        'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"});
++      try {
++        const id=verificar(req.params.token);
++        const detalle=await uno(db.d_ventas,id);
++        await uno(db.ventas,detalle.id_venta);
++        const l=await linea(detalle);
++        res.type('html').send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Boleto registrado</title></head><body style="font-family:Arial;background:#f0f5f8;color:#142438;padding:24px"><main style="max-width:600px;margin:auto;background:white;padding:28px;border-radius:14px"><h1>Boleto registrado</h1><h2>${escapar(l.evento)}</h2><p>Fecha del evento: ${escapar(l.fecha)}</p><p>Recinto: ${escapar(l.recinto)}</p><p>Entrada: ${escapar(l.tipo)} · Asiento: ${escapar(l.asiento)}</p><p>Boleto #${l.id}</p><hr><p>Esta consulta no confirma si el boleto ya se utilizó ni registra el ingreso.</p></main></body></html>`);
++      } catch { res.status(404).type('html').send('<h1>Boleto no disponible</h1><p>El enlace es incorrecto o el registro ya no existe.</p>'); }
++    });
++  }
++  return {enlace,verificar,datosVenta,html,pdf,enviar,registrar};
++};
+diff --git a/Proyecto_final_progra2/service/correo-gmail.js b/Proyecto_final_progra2/service/correo-gmail.js
+new file mode 100644
+index 0000000..d43f3a6
+--- /dev/null
++++ b/Proyecto_final_progra2/service/correo-gmail.js
+@@ -0,0 +1,19 @@
++// Archivo nuevo: Proyecto_final_progra2/service/correo-gmail.js
++const nodemailer = require('nodemailer');
++const {google} = require('googleapis');
++module.exports = function crearCorreoGmail(env = process.env) {
++  for (const nombre of ['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REFRESH_TOKEN'])
++    if (!env[nombre]) throw new Error('Falta configurar ' + nombre + ' en Render.');
++  const oauth = new google.auth.OAuth2(env.GOOGLE_CLIENT_ID,env.GOOGLE_CLIENT_SECRET);
++  oauth.setCredentials({refresh_token:env.GOOGLE_REFRESH_TOKEN});
++  const gmail = google.gmail({version:'v1',auth:oauth});
++  const compositor = nodemailer.createTransport({streamTransport:true,buffer:true,newline:'unix'});
++  return {
++    async sendMail(mensaje) {
++      const preparado = await compositor.sendMail(mensaje);
++      const respuesta = await gmail.users.messages.send({userId:'me',requestBody:{raw:preparado.message.toString('base64url')}});
++      if (!respuesta.data.id) throw new Error('Gmail no confirmó la aceptación del mensaje.');
++      return {accepted:[mensaje.to],messageId:respuesta.data.id};
++    }
++  };
++};
+diff --git a/package-lock.json b/package-lock.json
+index 5cca9b8..3de8904 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -14,8 +14,10 @@
+         "express": "^5.2.1",
+         "googleapis": "^186.0.0",
+         "nodemailer": "^10.1.7",
++        "pdfkit": "0.17.2",
+         "pg": "^8.23.0",
+         "pg-hstore": "^2.3.4",
++        "qrcode": "1.5.4",
+         "sequelize": "^6.37.8"
+       },
+       "devDependencies": {
+@@ -305,6 +307,15 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/@swc/helpers": {
++      "version": "0.5.23",
++      "resolved": "https://registry.npmjs.org/@swc/helpers/-/helpers-0.5.23.tgz",
++      "integrity": "sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "tslib": "^2.8.0"
++      }
++    },
+     "node_modules/@types/debug": {
+       "version": "4.1.13",
+       "resolved": "https://registry.npmjs.org/@types/debug/-/debug-4.1.13.tgz",
+@@ -669,6 +680,24 @@
+         "node": "20 || >=22"
+       }
+     },
++    "node_modules/brotli": {
++      "version": "1.3.3",
++      "resolved": "https://registry.npmjs.org/brotli/-/brotli-1.3.3.tgz",
++      "integrity": "sha512-oTKjJdShmDuGW94SyyaoQvAjf30dZaHnjJ8uAF+u2/vGJkJbJPJAT1gDiOJP5v1Zb6f9KEyW/1HpuaWIXtGHPg==",
++      "license": "MIT",
++      "dependencies": {
++        "base64-js": "^1.1.2"
++      }
++    },
++    "node_modules/browserify-zlib": {
++      "version": "0.2.0",
++      "resolved": "https://registry.npmjs.org/browserify-zlib/-/browserify-zlib-0.2.0.tgz",
++      "integrity": "sha512-Z942RysHXmJrhqk88FmKBVq/v5tqmSkDz7p54G/MGyjMnCFFnC79XWNbg+Vta8W6Wb2qtSZTSxIGkJrRpCFEiA==",
++      "license": "MIT",
++      "dependencies": {
++        "pako": "~1.0.5"
++      }
++    },
+     "node_modules/buffer-equal-constant-time": {
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
+@@ -727,6 +756,15 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/camelcase": {
++      "version": "5.3.1",
++      "resolved": "https://registry.npmjs.org/camelcase/-/camelcase-5.3.1.tgz",
++      "integrity": "sha512-L28STB170nwWS63UjtlEOE3dldQApaJXZkOI1uMFfzf3rRuPegHaHesyee+YxQ+W6SvRDQV6UrdOdRiR153wJg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=6"
++      }
++    },
+     "node_modules/chalk": {
+       "version": "1.1.3",
+       "resolved": "https://registry.npmjs.org/chalk/-/chalk-1.1.3.tgz",
+@@ -754,6 +792,65 @@
+         "node": ">=0.8.0"
+       }
+     },
++    "node_modules/cliui": {
++      "version": "6.0.0",
++      "resolved": "https://registry.npmjs.org/cliui/-/cliui-6.0.0.tgz",
++      "integrity": "sha512-t6wbgtoCXvAzst7QgXxJYqPt0usEfbgQdftEPbLL/cvv6HPE5VgvqCuAIDR0NgU52ds6rFwqrgakNLrHEjCbrQ==",
++      "license": "ISC",
++      "dependencies": {
++        "string-width": "^4.2.0",
++        "strip-ansi": "^6.0.0",
++        "wrap-ansi": "^6.2.0"
++      }
++    },
++    "node_modules/cliui/node_modules/ansi-regex": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
++      "integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/cliui/node_modules/strip-ansi": {
++      "version": "6.0.1",
++      "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
++      "integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
++      "license": "MIT",
++      "dependencies": {
++        "ansi-regex": "^5.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/clone": {
++      "version": "2.1.2",
++      "resolved": "https://registry.npmjs.org/clone/-/clone-2.1.2.tgz",
++      "integrity": "sha512-3Pe/CF1Nn94hyhIYpjtiLhdCoEoz0DqQ+988E9gmeEdQZlojxnOb74wctFyuwWQHzqyf9X7C7MG8juUpqBJT8w==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.8"
++      }
++    },
++    "node_modules/color-convert": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/color-convert/-/color-convert-2.0.1.tgz",
++      "integrity": "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==",
++      "license": "MIT",
++      "dependencies": {
++        "color-name": "~1.1.4"
++      },
++      "engines": {
++        "node": ">=7.0.0"
++      }
++    },
++    "node_modules/color-name": {
++      "version": "1.1.4",
++      "resolved": "https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz",
++      "integrity": "sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==",
++      "license": "MIT"
++    },
+     "node_modules/common-tags": {
+       "version": "1.8.2",
+       "resolved": "https://registry.npmjs.org/common-tags/-/common-tags-1.8.2.tgz",
+@@ -836,6 +933,13 @@
+         "node": ">= 8"
+       }
+     },
++    "node_modules/crypto-js": {
++      "version": "4.2.0",
++      "resolved": "https://registry.npmjs.org/crypto-js/-/crypto-js-4.2.0.tgz",
++      "integrity": "sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==",
++      "deprecated": "Active development of CryptoJS has been discontinued. This library is no longer maintained.",
++      "license": "MIT"
++    },
+     "node_modules/data-uri-to-buffer": {
+       "version": "4.0.1",
+       "resolved": "https://registry.npmjs.org/data-uri-to-buffer/-/data-uri-to-buffer-4.0.1.tgz",
+@@ -862,6 +966,15 @@
+         }
+       }
+     },
++    "node_modules/decamelize": {
++      "version": "1.2.0",
++      "resolved": "https://registry.npmjs.org/decamelize/-/decamelize-1.2.0.tgz",
++      "integrity": "sha512-z2S+W9X73hAUUki+N+9Za2lBlun89zigOyGrsax+KUQ6wKW4ZoWpEYBkGhQjwAjjDCkWxhY0VKEhk8wzY7F5cA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.10.0"
++      }
++    },
+     "node_modules/deep-is": {
+       "version": "0.1.4",
+       "resolved": "https://registry.npmjs.org/deep-is/-/deep-is-0.1.4.tgz",
+@@ -878,6 +991,18 @@
+         "node": ">= 0.8"
+       }
+     },
++    "node_modules/dfa": {
++      "version": "1.2.0",
++      "resolved": "https://registry.npmjs.org/dfa/-/dfa-1.2.0.tgz",
++      "integrity": "sha512-ED3jP8saaweFTjeGX8HQPjeC1YYyZs98jGNZx6IiBvxW7JG5v492kamAQB3m2wop07CvU/RQmzcKr6bgcC5D/Q==",
++      "license": "MIT"
++    },
++    "node_modules/dijkstrajs": {
++      "version": "1.0.3",
++      "resolved": "https://registry.npmjs.org/dijkstrajs/-/dijkstrajs-1.0.3.tgz",
++      "integrity": "sha512-qiSlmBq9+BCdCA/L46dw8Uy93mloxsPSbwnm5yrKn2vMPiy8KyAskTF6zuV/j5BMsmOGZDPs7KjU+mjb670kfA==",
++      "license": "MIT"
++    },
+     "node_modules/dotenv": {
+       "version": "18.0.8",
+       "resolved": "https://registry.npmjs.org/dotenv/-/dotenv-18.0.8.tgz",
+@@ -929,6 +1054,12 @@
+       "integrity": "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==",
+       "license": "MIT"
+     },
++    "node_modules/emoji-regex": {
++      "version": "8.0.0",
++      "resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz",
++      "integrity": "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==",
++      "license": "MIT"
++    },
+     "node_modules/encodeurl": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-2.0.0.tgz",
+@@ -1220,7 +1351,6 @@
+       "version": "3.1.3",
+       "resolved": "https://registry.npmjs.org/fast-deep-equal/-/fast-deep-equal-3.1.3.tgz",
+       "integrity": "sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==",
+-      "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/fast-json-stable-stringify": {
+@@ -1345,6 +1475,23 @@
+       "dev": true,
+       "license": "ISC"
+     },
++    "node_modules/fontkit": {
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/fontkit/-/fontkit-2.0.4.tgz",
++      "integrity": "sha512-syetQadaUEDNdxdugga9CpEYVaQIxOwk7GlwZWWZ19//qW4zE5bknOKeMBDYAASwnpaSHKJITRLMF9m1fp3s6g==",
++      "license": "MIT",
++      "dependencies": {
++        "@swc/helpers": "^0.5.12",
++        "brotli": "^1.3.2",
++        "clone": "^2.1.2",
++        "dfa": "^1.2.0",
++        "fast-deep-equal": "^3.1.3",
++        "restructure": "^3.0.0",
++        "tiny-inflate": "^1.0.3",
++        "unicode-properties": "^1.4.0",
++        "unicode-trie": "^2.0.0"
++      }
++    },
+     "node_modules/formdata-polyfill": {
+       "version": "4.0.10",
+       "resolved": "https://registry.npmjs.org/formdata-polyfill/-/formdata-polyfill-4.0.10.tgz",
+@@ -1412,6 +1559,15 @@
+         "node": ">=22"
+       }
+     },
++    "node_modules/get-caller-file": {
++      "version": "2.0.5",
++      "resolved": "https://registry.npmjs.org/get-caller-file/-/get-caller-file-2.0.5.tgz",
++      "integrity": "sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==",
++      "license": "ISC",
++      "engines": {
++        "node": "6.* || 8.* || >= 10.*"
++      }
++    },
+     "node_modules/get-intrinsic": {
+       "version": "1.3.0",
+       "resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
+@@ -1716,6 +1872,15 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/is-fullwidth-code-point": {
++      "version": "3.0.0",
++      "resolved": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz",
++      "integrity": "sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/is-glob": {
+       "version": "4.0.3",
+       "resolved": "https://registry.npmjs.org/is-glob/-/is-glob-4.0.3.tgz",
+@@ -1742,6 +1907,13 @@
+       "dev": true,
+       "license": "ISC"
+     },
++    "node_modules/jpeg-exif": {
++      "version": "1.1.4",
++      "resolved": "https://registry.npmjs.org/jpeg-exif/-/jpeg-exif-1.1.4.tgz",
++      "integrity": "sha512-a+bKEcCjtuW5WTdgeXFzswSrdqi0jk4XlEtZlx5A94wCoBpFjfFTbo/Tra5SpNCl/YFZPvcV1dJc+TAYeg6ROQ==",
++      "deprecated": "Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.",
++      "license": "MIT"
++    },
+     "node_modules/json-bigint": {
+       "version": "1.0.0",
+       "resolved": "https://registry.npmjs.org/json-bigint/-/json-bigint-1.0.0.tgz",
+@@ -1810,6 +1982,25 @@
+         "node": ">= 0.8.0"
+       }
+     },
++    "node_modules/linebreak": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/linebreak/-/linebreak-1.1.0.tgz",
++      "integrity": "sha512-MHp03UImeVhB7XZtjd0E4n6+3xr5Dq/9xI/5FptGk5FrbDR3zagPa2DS6U8ks/3HjbKWG9Q1M2ufOzxV2qLYSQ==",
++      "license": "MIT",
++      "dependencies": {
++        "base64-js": "0.0.8",
++        "unicode-trie": "^2.0.0"
++      }
++    },
++    "node_modules/linebreak/node_modules/base64-js": {
++      "version": "0.0.8",
++      "resolved": "https://registry.npmjs.org/base64-js/-/base64-js-0.0.8.tgz",
++      "integrity": "sha512-3XSA2cR/h/73EzlXXdU6YNycmYI7+kicTxks4eJg2g39biHR84slg2+des+p7iHYhbRg/udIS4TD53WabcOUkw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 0.4"
++      }
++    },
+     "node_modules/locate-path": {
+       "version": "6.0.0",
+       "resolved": "https://registry.npmjs.org/locate-path/-/locate-path-6.0.0.tgz",
+@@ -2134,6 +2325,21 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
++    "node_modules/p-try": {
++      "version": "2.2.0",
++      "resolved": "https://registry.npmjs.org/p-try/-/p-try-2.2.0.tgz",
++      "integrity": "sha512-R4nPAVTAU0B9D35/Gk3uJf/7XYbQcyohSKdvAxIRSNghFl4e71hVoGnBNQz9cWaXxO2I10KTC+3jMdvvoKw6dQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=6"
++      }
++    },
++    "node_modules/pako": {
++      "version": "1.0.11",
++      "resolved": "https://registry.npmjs.org/pako/-/pako-1.0.11.tgz",
++      "integrity": "sha512-4hLB8Py4zZce5s4yd9XzopqwVv/yGNhV1Bl8NTmCq1763HeK2+EwVTv+leGeL13Dnh2wfbqowVPXCIO0z4taYw==",
++      "license": "(MIT AND Zlib)"
++    },
+     "node_modules/parseurl": {
+       "version": "1.3.3",
+       "resolved": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
+@@ -2147,7 +2353,6 @@
+       "version": "4.0.0",
+       "resolved": "https://registry.npmjs.org/path-exists/-/path-exists-4.0.0.tgz",
+       "integrity": "sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": ">=8"
+@@ -2173,6 +2378,19 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
++    "node_modules/pdfkit": {
++      "version": "0.17.2",
++      "resolved": "https://registry.npmjs.org/pdfkit/-/pdfkit-0.17.2.tgz",
++      "integrity": "sha512-UnwF5fXy08f0dnp4jchFYAROKMNTaPqb/xgR8GtCzIcqoTnbOqtp3bwKvO4688oHI6vzEEs8Q6vqqEnC5IUELw==",
++      "license": "MIT",
++      "dependencies": {
++        "crypto-js": "^4.2.0",
++        "fontkit": "^2.0.4",
++        "jpeg-exif": "^1.1.4",
++        "linebreak": "^1.1.0",
++        "png-js": "^1.0.0"
++      }
++    },
+     "node_modules/pg": {
+       "version": "8.23.0",
+       "resolved": "https://registry.npmjs.org/pg/-/pg-8.23.0.tgz",
+@@ -2287,6 +2505,23 @@
+         "url": "https://github.com/sponsors/jonschlinkert"
+       }
+     },
++    "node_modules/png-js": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/png-js/-/png-js-1.1.0.tgz",
++      "integrity": "sha512-PM/uYGzGdNSzqeOgly68+6wKQDL1SY0a/N+OEa/+br6LnHWOAJB0Npiamnodfq3jd2LS/i2fMeOKSAILjA+m5Q==",
++      "dependencies": {
++        "browserify-zlib": "^0.2.0"
++      }
++    },
++    "node_modules/pngjs": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/pngjs/-/pngjs-5.0.0.tgz",
++      "integrity": "sha512-40QW5YalBNfQo5yRYmiw7Yz6TKKVr3h6970B2YE+3fQpsWcrbj1PzJgxeJ19DRQjhMbKPIuMY8rFaXc8moolVw==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=10.13.0"
++      }
++    },
+     "node_modules/postgres-array": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/postgres-array/-/postgres-array-2.0.0.tgz",
+@@ -2461,6 +2696,23 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/qrcode": {
++      "version": "1.5.4",
++      "resolved": "https://registry.npmjs.org/qrcode/-/qrcode-1.5.4.tgz",
++      "integrity": "sha512-1ca71Zgiu6ORjHqFBDpnSMTR2ReToX4l1Au1VFLyVeBTFavzQnv5JxMFr3ukHVKpSrSA2MCk0lNJSykjUfz7Zg==",
++      "license": "MIT",
++      "dependencies": {
++        "dijkstrajs": "^1.0.1",
++        "pngjs": "^5.0.0",
++        "yargs": "^15.3.1"
++      },
++      "bin": {
++        "qrcode": "bin/qrcode"
++      },
++      "engines": {
++        "node": ">=10.13.0"
++      }
++    },
+     "node_modules/qs": {
+       "version": "6.16.0",
+       "resolved": "https://registry.npmjs.org/qs/-/qs-6.16.0.tgz",
+@@ -2505,6 +2757,27 @@
+         "node": ">= 0.10"
+       }
+     },
++    "node_modules/require-directory": {
++      "version": "2.1.1",
++      "resolved": "https://registry.npmjs.org/require-directory/-/require-directory-2.1.1.tgz",
++      "integrity": "sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.10.0"
++      }
++    },
++    "node_modules/require-main-filename": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/require-main-filename/-/require-main-filename-2.0.0.tgz",
++      "integrity": "sha512-NKN5kMDylKuldxYLSUfrbo5Tuzh4hd+2E8NPPX02mZtn1VuREQToYe/ZdlJy+J3uCpfaiGF05e7B8W0iXbQHmg==",
++      "license": "ISC"
++    },
++    "node_modules/restructure": {
++      "version": "3.0.2",
++      "resolved": "https://registry.npmjs.org/restructure/-/restructure-3.0.2.tgz",
++      "integrity": "sha512-gSfoiOEA0VPE6Tukkrr7I0RBdE0s7H1eFCDBk05l1KIQT1UIKNc5JZy6jdyW6eYH3aR3g5b3PuL77rq0hvwtAw==",
++      "license": "MIT"
++    },
+     "node_modules/retry-as-promised": {
+       "version": "7.1.1",
+       "resolved": "https://registry.npmjs.org/retry-as-promised/-/retry-as-promised-7.1.1.tgz",
+@@ -2681,6 +2954,12 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
++    "node_modules/set-blocking": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/set-blocking/-/set-blocking-2.0.0.tgz",
++      "integrity": "sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw==",
++      "license": "ISC"
++    },
+     "node_modules/setprototypeof": {
+       "version": "1.2.0",
+       "resolved": "https://registry.npmjs.org/setprototypeof/-/setprototypeof-1.2.0.tgz",
+@@ -2810,6 +3089,41 @@
+         "node": ">= 0.8"
+       }
+     },
++    "node_modules/string-width": {
++      "version": "4.2.3",
++      "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
++      "integrity": "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==",
++      "license": "MIT",
++      "dependencies": {
++        "emoji-regex": "^8.0.0",
++        "is-fullwidth-code-point": "^3.0.0",
++        "strip-ansi": "^6.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/string-width/node_modules/ansi-regex": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
++      "integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/string-width/node_modules/strip-ansi": {
++      "version": "6.0.1",
++      "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
++      "integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
++      "license": "MIT",
++      "dependencies": {
++        "ansi-regex": "^5.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/strip-ansi": {
+       "version": "3.0.1",
+       "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-3.0.1.tgz",
+@@ -2833,6 +3147,12 @@
+         "node": ">=0.8.0"
+       }
+     },
++    "node_modules/tiny-inflate": {
++      "version": "1.0.3",
++      "resolved": "https://registry.npmjs.org/tiny-inflate/-/tiny-inflate-1.0.3.tgz",
++      "integrity": "sha512-pkY1fj1cKHb2seWDy0B16HeWyczlJA9/WW3u3c4z/NiWDsO3DOU5D7nhTLE9CF0yXv/QZFY7sEJmj24dK+Rrqw==",
++      "license": "MIT"
++    },
+     "node_modules/tinyglobby": {
+       "version": "0.2.17",
+       "resolved": "https://registry.npmjs.org/tinyglobby/-/tinyglobby-0.2.17.tgz",
+@@ -2882,7 +3202,6 @@
+       "version": "2.8.1",
+       "resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
+       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
+-      "dev": true,
+       "license": "0BSD"
+     },
+     "node_modules/type-check": {
+@@ -2956,6 +3275,32 @@
+       "integrity": "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==",
+       "license": "MIT"
+     },
++    "node_modules/unicode-properties": {
++      "version": "1.4.1",
++      "resolved": "https://registry.npmjs.org/unicode-properties/-/unicode-properties-1.4.1.tgz",
++      "integrity": "sha512-CLjCCLQ6UuMxWnbIylkisbRj31qxHPAurvena/0iwSVbQ2G1VY5/HjV0IRabOEbDHlzZlRdCrD4NhB0JtU40Pg==",
++      "license": "MIT",
++      "dependencies": {
++        "base64-js": "^1.3.0",
++        "unicode-trie": "^2.0.0"
++      }
++    },
++    "node_modules/unicode-trie": {
++      "version": "2.0.0",
++      "resolved": "https://registry.npmjs.org/unicode-trie/-/unicode-trie-2.0.0.tgz",
++      "integrity": "sha512-x7bc76x0bm4prf1VLg79uhAzKw8DVboClSN5VxJuQ+LKDOVEW9CdH+VY7SP+vX7xCYQqzzgQpFqz15zeLvAtZQ==",
++      "license": "MIT",
++      "dependencies": {
++        "pako": "^0.2.5",
++        "tiny-inflate": "^1.0.0"
++      }
++    },
++    "node_modules/unicode-trie/node_modules/pako": {
++      "version": "0.2.9",
++      "resolved": "https://registry.npmjs.org/pako/-/pako-0.2.9.tgz",
++      "integrity": "sha512-NUcwaKxUxWrZLpDG+z/xZaCgQITkA/Dv4V/T6bw7VON6l1Xz/VnrBqrYjZQ12TamKHzITTfOEIYUj48y2KXImA==",
++      "license": "MIT"
++    },
+     "node_modules/unpipe": {
+       "version": "1.0.0",
+       "resolved": "https://registry.npmjs.org/unpipe/-/unpipe-1.0.0.tgz",
+@@ -3058,6 +3403,12 @@
+         "node": ">= 8"
+       }
+     },
++    "node_modules/which-module": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/which-module/-/which-module-2.0.1.tgz",
++      "integrity": "sha512-iBdZ57RDvnOR9AGBhML2vFZf7h8vmBjhoaZqODJBFWHVtKkDmKuHai3cx5PgVMrX5YDNp27AofYbAwctSS+vhQ==",
++      "license": "ISC"
++    },
+     "node_modules/wkx": {
+       "version": "0.5.0",
+       "resolved": "https://registry.npmjs.org/wkx/-/wkx-0.5.0.tgz",
+@@ -3077,6 +3428,56 @@
+         "node": ">=0.10.0"
+       }
+     },
++    "node_modules/wrap-ansi": {
++      "version": "6.2.0",
++      "resolved": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-6.2.0.tgz",
++      "integrity": "sha512-r6lPcBGxZXlIcymEu7InxDMhdW0KDxpLgoFLcguasxCaJ/SOIZwINatK9KY/tf+ZrlywOKU0UDj3ATXUBfxJXA==",
++      "license": "MIT",
++      "dependencies": {
++        "ansi-styles": "^4.0.0",
++        "string-width": "^4.1.0",
++        "strip-ansi": "^6.0.0"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/wrap-ansi/node_modules/ansi-regex": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
++      "integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/wrap-ansi/node_modules/ansi-styles": {
++      "version": "4.3.0",
++      "resolved": "https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.3.0.tgz",
++      "integrity": "sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==",
++      "license": "MIT",
++      "dependencies": {
++        "color-convert": "^2.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      },
++      "funding": {
++        "url": "https://github.com/chalk/ansi-styles?sponsor=1"
++      }
++    },
++    "node_modules/wrap-ansi/node_modules/strip-ansi": {
++      "version": "6.0.1",
++      "resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
++      "integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
++      "license": "MIT",
++      "dependencies": {
++        "ansi-regex": "^5.0.1"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/wrappy": {
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
+@@ -3092,6 +3493,99 @@
+         "node": ">=0.4"
+       }
+     },
++    "node_modules/y18n": {
++      "version": "4.0.3",
++      "resolved": "https://registry.npmjs.org/y18n/-/y18n-4.0.3.tgz",
++      "integrity": "sha512-JKhqTOwSrqNA1NY5lSztJ1GrBiUodLMmIZuLiDaMRJ+itFd+ABVE8XBjOvIWL+rSqNDC74LCSFmlb/U4UZ4hJQ==",
++      "license": "ISC"
++    },
++    "node_modules/yargs": {
++      "version": "15.4.1",
++      "resolved": "https://registry.npmjs.org/yargs/-/yargs-15.4.1.tgz",
++      "integrity": "sha512-aePbxDmcYW++PaqBsJ+HYUFwCdv4LVvdnhBy78E57PIor8/OVvhMrADFFEDh8DHDFRv/O9i3lPhsENjO7QX0+A==",
++      "license": "MIT",
++      "dependencies": {
++        "cliui": "^6.0.0",
++        "decamelize": "^1.2.0",
++        "find-up": "^4.1.0",
++        "get-caller-file": "^2.0.1",
++        "require-directory": "^2.1.1",
++        "require-main-filename": "^2.0.0",
++        "set-blocking": "^2.0.0",
++        "string-width": "^4.2.0",
++        "which-module": "^2.0.0",
++        "y18n": "^4.0.0",
++        "yargs-parser": "^18.1.2"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/yargs-parser": {
++      "version": "18.1.3",
++      "resolved": "https://registry.npmjs.org/yargs-parser/-/yargs-parser-18.1.3.tgz",
++      "integrity": "sha512-o50j0JeToy/4K6OZcaQmW6lyXXKhq7csREXcDwk2omFPJEwUNOVtJKvmDr9EI1fAJZUyZcRF7kxGBWmRXudrCQ==",
++      "license": "ISC",
++      "dependencies": {
++        "camelcase": "^5.0.0",
++        "decamelize": "^1.2.0"
++      },
++      "engines": {
++        "node": ">=6"
++      }
++    },
++    "node_modules/yargs/node_modules/find-up": {
++      "version": "4.1.0",
++      "resolved": "https://registry.npmjs.org/find-up/-/find-up-4.1.0.tgz",
++      "integrity": "sha512-PpOwAdQ/YlXQ2vj8a3h8IipDuYRi3wceVQQGYWxNINccq40Anw7BlsEXCMbt1Zt+OLA6Fq9suIpIWD0OsnISlw==",
++      "license": "MIT",
++      "dependencies": {
++        "locate-path": "^5.0.0",
++        "path-exists": "^4.0.0"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/yargs/node_modules/locate-path": {
++      "version": "5.0.0",
++      "resolved": "https://registry.npmjs.org/locate-path/-/locate-path-5.0.0.tgz",
++      "integrity": "sha512-t7hw9pI+WvuwNJXwk5zVHpyhIqzg2qTlklJOf0mVxGSbe3Fp2VieZcduNYjaLDoy6p9uGpQEGWG87WpMKlNq8g==",
++      "license": "MIT",
++      "dependencies": {
++        "p-locate": "^4.1.0"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
++    "node_modules/yargs/node_modules/p-limit": {
++      "version": "2.3.0",
++      "resolved": "https://registry.npmjs.org/p-limit/-/p-limit-2.3.0.tgz",
++      "integrity": "sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w==",
++      "license": "MIT",
++      "dependencies": {
++        "p-try": "^2.0.0"
++      },
++      "engines": {
++        "node": ">=6"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/sindresorhus"
++      }
++    },
++    "node_modules/yargs/node_modules/p-locate": {
++      "version": "4.1.0",
++      "resolved": "https://registry.npmjs.org/p-locate/-/p-locate-4.1.0.tgz",
++      "integrity": "sha512-R79ZZ/0wAxKGu3oYMlz8jy/kbhsNrS7SKZ7PxEHBgJ5+F2mtFW2fK2cOtBh1cHYkQsbzFV7I+EoRKe6Yt0oK7A==",
++      "license": "MIT",
++      "dependencies": {
++        "p-limit": "^2.2.0"
++      },
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/yocto-queue": {
+       "version": "0.1.0",
+       "resolved": "https://registry.npmjs.org/yocto-queue/-/yocto-queue-0.1.0.tgz",
+diff --git a/package.json b/package.json
+index e59c73f..e38f1a5 100644
+--- a/package.json
++++ b/package.json
+@@ -6,10 +6,10 @@
+   "author": "",
+   "type": "commonjs",
+   "main": "server.js",
+- "scripts": {
+-   "start": "node server.js",
+-   "test": "echo \"Error: no test specified\" && exit 1"
+- },
++  "scripts": {
++    "start": "node server.js",
++    "test": "node test/comprobantes.test.cjs && node test/correo-gmail.test.cjs && node test/ventas-controller.test.cjs"
++  },
+   "dependencies": {
+     "cors": "^2.8.6",
+     "dotenv": "^18.0.8",
+@@ -18,7 +18,9 @@
+     "nodemailer": "^10.1.7",
+     "pg": "^8.23.0",
+     "pg-hstore": "^2.3.4",
+-    "sequelize": "^6.37.8"
++    "sequelize": "^6.37.8",
++    "pdfkit": "0.17.2",
++    "qrcode": "1.5.4"
+   },
+   "devDependencies": {
+     "@eslint/js": "^10.0.1",
+diff --git a/server.js b/server.js
+index 12939ae..9d1101c 100644
+--- a/server.js
++++ b/server.js
+@@ -33,6 +33,12 @@ require("./Proyecto_final_progra2/route/localidades.route")(app);
+ require("./Proyecto_final_progra2/route/usuario.route")(app);
+ require("./Proyecto_final_progra2/route/ventas.route")(app);
+ require("./Proyecto_final_progra2/route/cliente.route")(app);
++// No impedir el inicio de la API si aún falta configurar el QR visual.
++try {
++  require("./Proyecto_final_progra2/service/comprobantes.instance")().registrar(app);
++} catch {
++  console.warn("QR visual pendiente: revisar BOLETOS_QR_SECRET y PUBLIC_BASE_URL en Render.");
++}
+ const PORT = process.env.PORT || 8081;
+ app.listen(PORT, () => {
+   console.log(`Server is running on port ${PORT}.`);
+diff --git a/test/comprobantes.test.cjs b/test/comprobantes.test.cjs
+new file mode 100644
+index 0000000..a3b0fcc
+--- /dev/null
++++ b/test/comprobantes.test.cjs
+@@ -0,0 +1,29 @@
++const assert=require('node:assert/strict');const crypto=require('node:crypto');
++const crear=require('../Proyecto_final_progra2/service/comprobantes');
++const express=require('express');
++const venta={id_venta:8,id_vendedor:2,fecha_venta:'2026-10-25T20:00:00.000Z',total_venta:1225};
++const detalles=[{id_detalle:21,id_inventario:700,id_cliente:1,asiento:'J-10',cantidad:1,precio_unitario:500,subtotal:500,id_venta:8},{id_detalle:22,id_inventario:701,id_cliente:1,asiento:'A-1',cantidad:1,precio_unitario:725,subtotal:725,id_venta:8}];
++const db={ventas:{findByPk:async()=>venta},d_ventas:{findAll:async()=>detalles,findByPk:async id=>detalles.find(d=>d.id_detalle===id)},
++ i_boletos:{findByPk:async id=>({id_concierto:1,id_localidad:id})},concierto:{findByPk:async()=>({titulo_evento:'Evento de ejemplo <script>alert(1)</script>',fecha_concierto:'2026-12-06T00:00:00.000Z',recinto:'Recinto de ejemplo'})},
++ localidades:{findByPk:async id=>({nombre:id===700?'General':'VIP'})},
++ cliente:{findByPk:async()=>({nombre:'Cliente',apellido:'Ejemplo',correo:'cliente@example.invalid',telefono:'0000-0000'})},
++ usuario:{findByPk:async(_id,options)=>{assert(!options.attributes.includes('contrasena_hash'));return {nombre_completo:'Vendedor ejemplo'};}}};
++let enviados=0;
++const api=crear({db,secret:crypto.randomBytes(32).toString('hex'),baseUrl:'https://proyectoapi2026.onrender.com',from:'Boleteria <sender@example.invalid>',
++ transporter:{sendMail:async m=>{enviados++;assert.equal(m.to,'cliente@example.invalid');assert(!m.bcc);assert(!m.html.includes('<script>'));assert.equal(m.attachments[0].content.subarray(0,4).toString(),'%PDF');
++ 
++ return {accepted:[m.to],messageId:'mock-only'};}}});
++(async()=>{
++ const url=api.enlace(detalles[0]);const token=url.split('/').pop();assert.equal(api.verificar(token),21);
++ assert.throws(()=>api.verificar(token.slice(0,-1)+(token.endsWith('A')?'B':'A')));
++ const d=await api.datosVenta(8);assert.equal(d.total,122500);assert.equal(d.lineas.length,2);assert.equal(d.lineas[0].fecha,'06/12/2026');
++ assert(!url.includes('cliente'));assert(!url.includes('0000'));
++ const app=express();api.registrar(app);const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
++ try{const base='http://127.0.0.1:'+server.address().port;
++  const r=await fetch(base+'/api/boletos/ver/'+token);assert.equal(r.status,200);const html=await r.text();assert(!html.includes('cliente@example.invalid'));assert(!html.includes('<script>'));assert(html.includes('06/12/2026'));
++  assert.equal((await fetch(base+'/api/boletos/ver/invalido')).status,404);
++ }finally{server.close();}
++ const estado=await api.enviar(8);assert.equal(estado.estado,'aceptado');assert.equal(enviados,1);
++ venta.total_venta=1000;await assert.rejects(()=>api.enviar(8));assert.equal(enviados,1);
++ console.log('PASS: signed QR rejects tampering; real Express route; public page hides contact data; dates; receipt PDF; simulated mail; inconsistent totals blocked. No real mail or database access.');
++})().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/test/correo-gmail.test.cjs b/test/correo-gmail.test.cjs
+new file mode 100644
+index 0000000..f822e7c
+--- /dev/null
++++ b/test/correo-gmail.test.cjs
+@@ -0,0 +1,23 @@
++const assert = require('node:assert/strict');
++const {google} = require('googleapis');
++const original = google.gmail;
++let requests = 0;
++google.gmail = () => ({users:{messages:{send:async mensaje => {
++  requests++;
++  assert.equal(mensaje.userId,'me');
++  const mime=Buffer.from(mensaje.requestBody.raw,'base64url').toString('utf8');
++  assert(mime.includes('cliente@example.invalid'));
++  assert(mime.includes('comprobante.pdf'));
++  assert(mime.includes('application/pdf'));
++  return {data:{id:'simulacion-sin-envio'}};
++}}}});
++(async()=>{
++ try {
++  const crear=require('../Proyecto_final_progra2/service/correo-gmail');
++  assert.throws(()=>crear({}),/GOOGLE_CLIENT_ID/);
++  const transporte=crear({GOOGLE_CLIENT_ID:'test-only',GOOGLE_CLIENT_SECRET:'test-only',GOOGLE_REFRESH_TOKEN:'test-only'});
++  const r=await transporte.sendMail({from:'remitente@example.invalid',to:'cliente@example.invalid',subject:'Prueba local',text:'Prueba',attachments:[{filename:'comprobante.pdf',content:Buffer.from('%PDF-simulado'),contentType:'application/pdf'}]});
++  assert.equal(requests,1);assert.equal(r.messageId,'simulacion-sin-envio');
++  console.log('PASS: real MIME composition and mocked Gmail HTTPS API, PDF attachment, no real mail.');
++ } finally { google.gmail=original; }
++})().catch(e=>{console.error(e);process.exitCode=1;});
+diff --git a/test/ventas-controller.test.cjs b/test/ventas-controller.test.cjs
+new file mode 100644
+index 0000000..efc66d8
+--- /dev/null
++++ b/test/ventas-controller.test.cjs
+@@ -0,0 +1,38 @@
++const assert=require('node:assert/strict');
++const vm=require('node:vm');
++const fs=require('node:fs');
++const path=require('node:path');
++function entorno(falloCorreo=false){
++  const detalles=[];let enviados=0;const conteos=[];
++  const concierto={id_concierto:1,estado:'programado',async update(v){Object.assign(this,v);}};
++  const venta={id_venta:8,total_venta:0,async update(v){Object.assign(this,v);}};
++  const invs=new Map([[700,{id_inventario:700,id_concierto:1,id_localidad:700,precio:500,cantidad_disponible:1}],
++    [701,{id_inventario:701,id_concierto:1,id_localidad:701,precio:500,cantidad_disponible:1}]]);
++  for(const inv of invs.values())inv.update=async function(v){Object.assign(this,v);};
++  const localidades=new Map([[700,{nombre:'General',asiento:'J-10',estado:true}],[701,{nombre:'VIP',asiento:'A-1',estado:true}]]);
++  for(const l of localidades.values())l.update=async function(v){Object.assign(this,v);};
++  const db={Sequelize:{Op:{gt:Symbol('gt')}},ventas:{findByPk:async()=>venta},cliente:{findByPk:async()=>({id:1})},
++    d_ventas:{findOne:async()=>detalles[0]||null,create:async datos=>{const d={...datos,id_detalle:21+detalles.length,toJSON(){return {...datos,id_detalle:this.id_detalle};}};detalles.push(d);return d;}},
++    i_boletos:{findByPk:async id=>invs.get(id),count:async()=>{const n=[...invs.values()].filter(i=>i.cantidad_disponible>0).length;conteos.push(n);return n;}},
++    localidades:{findByPk:async id=>localidades.get(id)},concierto:{findByPk:async()=>concierto}};
++  const helper={enviar:async()=>{enviados++;if(falloCorreo)throw new Error('simulado');return {estado:'aceptado'};},enlace:d=>'https://example.invalid/qr/'+d.id_detalle};
++  const ctx={exports:{},console:{error(){}} ,require:n=>{if(n==='../models')return db;if(n==='../service/comprobantes.instance')return()=>helper;throw new Error('Unexpected dependency '+n);}};
++  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../Proyecto_final_progra2/controller/detalle_ventas.controller.js'),'utf8'),ctx);
++  const res=()=>({statusCode:200,headers:{},status(c){this.statusCode=c;return this;},set(k,v){this.headers[k]=v;return this;},send(body){this.body=body;return this;}});
++  return {controller:ctx.exports,detalles,venta,concierto,conteos,enviados:()=>enviados,res};
++}
++(async()=>{
++ for(const fallo of [false,true]){
++  const e=entorno(fallo);const r=e.res();
++  await e.controller.create({body:{id_venta:8,id_cliente:1,id_inventario:[700,701]}},r);
++  assert.equal(r.statusCode,201);assert.equal(e.detalles.length,2);assert.equal(e.venta.total_venta,1225);
++  assert.deepEqual(e.conteos,[1,0]);assert.equal(e.concierto.estado,'Agotado');assert.equal(e.enviados(),1);
++  assert.equal(r.headers['X-Comprobante-Correo'],fallo?'pendiente':'aceptado');
++  assert.equal(r.body[0].comprobante_correo,fallo?'pendiente':'aceptado');assert(r.body[0].qr_url);
++  const repetida=e.res();await e.controller.create({body:{id_venta:8,id_cliente:1,id_inventario:[700]}},repetida);
++  assert.equal(repetida.statusCode,400);assert.equal(e.detalles.length,2);assert.equal(e.enviados(),1);
++ }
++ const e=entorno();const r=e.res();await e.controller.create({body:{id_venta:8,id_cliente:1,id_inventario:[700,700]}},r);
++ assert.equal(r.statusCode,400);assert.equal(e.detalles.length,0);assert.equal(e.enviados(),0);
++ console.log('PASS actual sales controller: correct inventory model/count, recorded total, mail accepted/pending without recharging, duplicate sales/seat IDs rejected. No real DB or mail.');
++})().catch(e=>{console.error(e);process.exitCode=1;});

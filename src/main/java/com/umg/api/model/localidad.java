@@ -11,12 +11,14 @@ package com.umg.api.model;
 public class localidad {
     
     private int id_localidad;
-    private int nombre;
+    private String nombre;
+    private String asiento;
+    private boolean estado;
 
     public localidad() {
     }
 
-    public localidad(int id_localidad, int nombre) {
+    public localidad(int id_localidad, String nombre) {
         this.id_localidad = id_localidad;
         this.nombre = nombre;
     }
@@ -29,12 +31,28 @@ public class localidad {
         this.id_localidad = id_localidad;
     }
 
-    public int getNombre() {
+    public String getNombre() {
         return nombre;
     }
 
-    public void setNombre(int nombre) {
+    public void setNombre(String nombre) {
         this.nombre = nombre;
+    }
+
+    public String getAsiento() {
+        return asiento;
+    }
+
+    public void setAsiento(String asiento) {
+        this.asiento = asiento;
+    }
+
+    public boolean isEstado() {
+        return estado;
+    }
+
+    public void setEstado(boolean estado) {
+        this.estado = estado;
     }
 
     @Override

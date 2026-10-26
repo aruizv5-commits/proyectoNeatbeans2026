@@ -1,0 +1,18 @@
+{
+  "private": true,
+  "name": "svb-comprobantes-integracion",
+  "version": "1.0.0",
+  "description": "Módulos para integrar en la API Express existente, no es un servidor independiente",
+  "dependencies": {
+    "pdfkit": "0.17.2",
+    "qrcode": "1.5.4"
+  },
+  "scripts": {
+    "test": "node test/comprobantes.test.cjs && node test/correo-gmail.test.cjs"
+  },
+  "devDependencies": {
+    "express": "5.2.1",
+    "nodemailer": "10.1.7",
+    "googleapis": "186.0.0"
+  }
+}
