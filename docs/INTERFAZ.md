@@ -9,7 +9,7 @@ El ZIP de referencia `proyectoNeatbeans2026interfaz.zip` contiene una aplicació
 - Botón ☰ para contraer/expandir el menú. Las opciones contraídas conservan tooltip y nombre accesible.
 - Tablas con cabecera azul, filas alternadas y selección clara, inspiradas en Estilos.java del ZIP.
 - Vistas conservadas al navegar: no se reconstruye ni vacía el carrito al cambiar de módulo. Se mantiene la actualización de datos que ya existía.
-- Contenedores con desplazamiento y dimensiones de ventana adaptadas al área disponible de pantalla. Punto de venta ajustado para mantener accesibles Agregar al carrito y Cobrar.
+- Contenedores con desplazamiento y dimensiones de ventana adaptadas al área disponible de pantalla. Punto de venta ajustado para mantener accesible Cobrar; los asientos se eligen en el mapa del estadio.
 
 ## Copiar los cambios a tu NetBeans actual, sin descargar un ZIP
 
@@ -39,7 +39,7 @@ Para pantallas pequeñas, contrae el menú con ☰. Si una tabla o formulario ne
 
 - Build/package de Maven; no se agregaron dependencias.
 - Prueba JavaFX con datos ficticios: ocho módulos para administrador y tres para vendedor, navegación y selección activa, conservación del carrito y del total VIP Q1,450, cierre de sesión y validación del login vacío.
-- Ventana real de prueba de 1024×620 con menú contraído: Agregar al carrito y Cobrar quedan dentro del área visible.
+- Ventana real de prueba de 1024×620 con menú contraído: Cobrar queda dentro del área visible (con el mapa del estadio, comprobado con una ventana de 952×556, que es el área de contenido con el menú contraído).
 - Comparación de código: desde recargar() hasta el final de PuntoVentaView se conserva exactamente la lógica anterior de datos, filtros, tarifas, carrito y cobro.
 - Sin llamadas a la API, ventas ni correos durante estas pruebas de interfaz. Las capturas muestran datos ficticios.
 

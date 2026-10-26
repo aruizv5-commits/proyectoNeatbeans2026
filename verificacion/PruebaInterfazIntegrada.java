@@ -38,7 +38,7 @@ public class PruebaInterfazIntegrada {
         var c=new concierto();c.setId_concierto(1);c.setId_artista(1);c.setTitulo_evento("Noche de música");c.setFecha_concierto("2026-12-06T00:00:00Z");c.setRecinto("Auditorio de muestra");c.setEstado("programado");
         ((ObservableList<concierto>)campo(p,"todos")).add(c);
         ((TableView<concierto>)campo(p,"tblConciertos")).getSelectionModel().select(c);
-        ((TableView<inventarios_boletos>)campo(p,"tblInventario")).getSelectionModel().selectFirst();invocar(p,"agregarAlCarrito");
+        var elegir=p.getClass().getDeclaredMethod("alternarAsiento",int.class);elegir.setAccessible(true);elegir.invoke(p,1);   // clic en el asiento A-1 del mapa
         var cl=new cliente();cl.setId(1);cl.setNombre("Cliente");cl.setApellido("Muestra");cl.setNit("CF");
         var cb=(ComboBox<cliente>)campo(p,"cbCliente");cb.getItems().add(cl);cb.getSelectionModel().selectFirst();return p;
     }
@@ -76,7 +76,7 @@ public class PruebaInterfazIntegrada {
             }catch(Exception ex){throw new RuntimeException(ex);}};
             MainView root=new MainView(admin,factory);Stage ventana=new Stage();ventana.setScene(escena(root,1280,720));ventana.show();root.applyCss();root.layout();
             verificar(root.lookupAll(".nav-button").size()==8,"Faltan módulos de administrador");
-            foto(ventana.getScene(),dir.resolve("interfaz-ventas.png"));accesible(root,"Agregar al carrito");accesible(root,"Cobrar");
+            foto(ventana.getScene(),dir.resolve("interfaz-ventas.png"));accesible(root,"Cobrar");
             ((ToggleButton)root.lookup("#nav-conciertos")).fire();((ToggleButton)root.lookup("#nav-reportes")).fire();
             verificar(((BorderPane)root.getCenter()).getCenter() instanceof ScrollPane,"No se mostró el módulo");
             verificar(((ToggleButton)root.lookup("#nav-reportes")).isSelected() && !((ToggleButton)root.lookup("#nav-ventas")).isSelected(),"Selección lateral incorrecta");
@@ -89,7 +89,7 @@ public class PruebaInterfazIntegrada {
             ((Button)root.lookup("#toggle-menu")).fire();
             ventana.getScene().setRoot(new Pane());ventana.close();ventana=new Stage();ventana.setScene(escena(root,1024,620));ventana.show();root.applyCss();root.layout();
             verificar(ventana.getScene().getWidth()<=1024 && ventana.getScene().getHeight()<=620,"No se aplicó la resolución pequeña");
-            foto(ventana.getScene(),dir.resolve("interfaz-compacta.png"));accesible(root,"Agregar al carrito");accesible(root,"Cobrar");
+            foto(ventana.getScene(),dir.resolve("interfaz-compacta.png"));accesible(root,"Cobrar");
             ((ToggleButton)root.lookup("#nav-ventas")).fire();verificar(((ToggleButton)root.lookup("#nav-ventas")).isSelected(),"Se deseleccionó la ruta activa");
             var vendedor=usuario("vendedor");Sesion.iniciar(vendedor,null);
             MainView ventaRoot=new MainView(vendedor,id->new VistaPrueba(new Label("Vista de prueba")));
