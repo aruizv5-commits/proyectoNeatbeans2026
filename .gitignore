@@ -1,6 +1,1 @@
-# datos privados: contraseña de aplicación de Gmail
-correo.properties.ejemplo
-
-# archivos que genera Maven / NetBeans
-target/
-nbactions.xml
+/target/

@@ -25,13 +25,9 @@ Entrar en **Comprobantes**, indicar una venta existente y guardar el PDF. La pri
 
 El código QR contiene una URL HTTPS real. Si la API todavía no tiene la página visual, abre el registro JSON del detalle existente; no envía un identificador a una búsqueda de Google. Cuando el backend entregue qr_url, abre la página visual firmada automáticamente. No incluye teléfonos, nombres ni contraseñas dentro del QR.
 
-**Importante:** el botón *Guardar comprobante y boletos PDF* de una venta existente no vuelve a cobrar ni envía un correo. El envío automático se integra en el backend al completar una venta nueva. Los módulos están en [backend-para-integrar](backend-para-integrar/INTEGRACION.md); todavía requieren publicación por el propietario de Proyectoapi2026 y configuración de Render. No afirmar envío o entrega real hasta verificarlo.
+**Importante:** generar un PDF de una venta existente no vuelve a cobrar ni envía un correo. El envío automático se integra en el backend al completar una venta nueva. Los módulos están en [backend-para-integrar](backend-para-integrar/INTEGRACION.md); todavía requieren publicación por el propietario de Proyectoapi2026 y configuración de Render. No afirmar envío o entrega real hasta verificarlo.
 
 Para otros vendedores, el nombre completo requiere que la API devuelva vendedor_nombre. Si no lo hace, se usa el nombre de sesión para ventas propias, o Vendedor #ID. No se consulta el endpoint de usuarios que devuelve credenciales.
-
-## Envío del comprobante por Gmail (desde Java)
-
-El programa puede enviar el comprobante con los boletos al correo del cliente directamente con SMTP de Gmail, sin depender de la API: automáticamente al cobrar una venta y, de forma manual, desde *Comprobantes y QR*. Requiere crear una contraseña de aplicación de Gmail y el archivo `correo.properties` (no se sube a GitHub). Pasos en [docs/CORREO_GMAIL.md](docs/CORREO_GMAIL.md). Si el archivo no existe, la venta funciona igual y no se envía nada.
 
 ## Reportes de ventas (administrador)
 

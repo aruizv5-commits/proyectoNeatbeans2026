@@ -9,11 +9,8 @@ import com.umg.api.model.concierto;
 import com.umg.api.model.inventarios_boletos;
 import com.umg.api.model.localidad;
 import com.umg.api.model.ventas;
-import com.umg.api.reportes.ComprobanteCorreo;
 import com.umg.api.service.artistaservice;
 import com.umg.api.service.checkoutservice;
-import com.umg.api.service.ComprobanteService;
-import com.umg.api.service.CorreoService;
 import com.umg.api.service.clienteservice;
 import com.umg.api.service.conciertoservice;
 import com.umg.api.service.inventarios_boletosservice;
@@ -356,8 +353,7 @@ public class PuntoVentaView extends HBox implements Recargable {
         if (!Ui.confirmar(boletos + " boleto(s) por " + Ui.dinero(total()) + "\n¿Confirmar la venta?")) return;
 
         int idVendedor = Sesion.actual().getId_usuario();
-        cliente clienteVenta = cbCliente.getValue();
-        Integer idCliente = clienteVenta == null ? null : clienteVenta.getId();
+        Integer idCliente = cbCliente.getValue() == null ? null : cbCliente.getValue().getId();
         List<checkoutservice.Item> items = carrito.stream()
                 .map(l -> new checkoutservice.Item(l.inv().getId_inventario(), l.cantidad())).toList();
 
@@ -368,31 +364,11 @@ public class PuntoVentaView extends HBox implements Recargable {
                     carrito.clear();
                     Ui.info("Venta #" + v.getId_venta() + " registrada.\nTotal cobrado: " + Ui.dinero(v.getTotal_venta()));
                     recargar();
-                    enviarComprobante(v.getId_venta(), clienteVenta);
                 },
                 msg -> {
                     cobrando.set(false);
                     Ui.error(msg);
                     recargar();   // refresca disponibilidad por si otro vendedor agotó boletos
                 });
-    }
-
-    // Después de cobrar, manda el comprobante al correo del cliente (si el correo ya está configurado)
-    private void enviarComprobante(int idVenta, cliente clienteVenta) {
-        if (!CorreoService.configurado()) return;      // sin correo.properties no se envía nada (ver docs/CORREO_GMAIL.md)
-
-        String correo = clienteVenta == null || clienteVenta.getCorreo() == null ? "" : clienteVenta.getCorreo().trim();
-        if (!correo.contains("@") || correo.contains(" ")) {
-            Ui.info("La venta ya quedó registrada, pero el cliente no tiene un correo válido: no se envió el comprobante.");
-            return;
-        }
-
-        Integer vendedor = Sesion.esAdmin() ? null : Sesion.actual().getId_usuario();
-        Async.run(() -> {
-                    ComprobanteCorreo.enviar(new ComprobanteService().cargar(idVenta, vendedor), correo);
-                    return correo;
-                },
-                c -> Ui.info("Comprobante enviado a " + c + "."),
-                msg -> Ui.error("La venta #" + idVenta + " ya quedó registrada, pero no se pudo enviar el correo:\n" + msg));
     }
 }
