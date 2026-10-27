@@ -14,7 +14,7 @@ Se adaptó el diseño visual del ZIP Swing recibido a JavaFX: menú lateral azul
 
 1. Descargar el proyecto desde GitHub (Code → Download ZIP), extraerlo y abrir la carpeta que contiene pom.xml en NetBeans. Conservar el proyecto anterior como respaldo.
 2. Usar JDK 25 o 26 (JavaFX 26.0.1 requiere al menos JDK 24). El código de la aplicación se compila con release 17, pero las bibliotecas JavaFX necesitan un JDK reciente.
-3. Ejecutar `mvn clean package -Pjar-ejecutable` y `mvn javafx:run`, o Clean and Build / Run desde NetBeans.
+3. Ejecutar `mvn clean package -Pjar-ejecutable` y `mvn javafx:run`, o Clean and Build / Run desde NetBeans. Paso a paso para el .jar en [docs/GENERAR_JAR.md](docs/GENERAR_JAR.md).
 4. Compilar en Windows para crear un JAR que incluya las bibliotecas JavaFX de Windows; no usar en Windows un JAR generado para Linux.
 
 La API por defecto es `https://proyectoapi2026.onrender.com/api`. Se puede cambiar mediante BOLETOS_API_URL o la propiedad JVM api.url. No hace falta conectar el cliente a PostgreSQL ni introducir claves de la BD.

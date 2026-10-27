@@ -1,6 +1,8 @@
 package com.umg.api.service;
 
+import jakarta.activation.CommandMap;
 import jakarta.activation.DataHandler;
+import jakarta.activation.MailcapCommandMap;
 import jakarta.mail.Authenticator;
 import jakarta.mail.internet.AddressException;
 import jakarta.mail.AuthenticationFailedException;
@@ -17,17 +19,24 @@ import jakarta.mail.internet.MimeMultipart;
 import jakarta.mail.util.ByteArrayDataSource;
 
 import java.io.IOException;
+import java.io.StringReader;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 /**
  * Envía correos con Gmail directamente desde el programa (SMTP), sin pasar por la API.
  *
  * Gmail no acepta la contraseña normal de la cuenta: hay que crear una "contraseña de aplicación"
- * (ver docs/CORREO_GMAIL.md). Los datos se leen del archivo correo.properties (junto al pom.xml,
- * NO se sube a GitHub) o de las variables de entorno GMAIL_USUARIO y GMAIL_CLAVE:
+ * (ver docs/CORREO_GMAIL.md). Los datos se leen del archivo correo.properties (junto al pom.xml o junto al
+ * .jar; NO se sube a GitHub) o de las variables de entorno GMAIL_USUARIO y GMAIL_CLAVE:
  *
  *     usuario=micuenta@gmail.com
  *     clave=abcdefghijklmnop
@@ -49,9 +58,17 @@ public class CorreoService {
         this.host = p.getProperty("host", "smtp.gmail.com").trim();
         this.puerto = Integer.parseInt(p.getProperty("puerto", "587").trim());
         if (usuario == null || clave.isEmpty()) {
-            throw new Exception("Falta configurar el correo. Crea el archivo " + ARCHIVO
-                    + " junto al pom.xml con las líneas usuario=... y clave=... (contraseña de aplicación de Gmail).\n"
-                    + "Los pasos están en docs/CORREO_GMAIL.md");
+            Path archivo = buscarArchivo();
+            if (archivo == null) {
+                StringBuilder carpetas = new StringBuilder();
+                for (Path c : carpetasDeBusqueda()) carpetas.append("\n  ").append(c);
+                throw new Exception("No se encontró el archivo " + ARCHIVO + ". Créalo en cualquiera de estas carpetas "
+                        + "(la mejor es la del programa: junto al pom.xml o junto al .jar):" + carpetas + "\n\n"
+                        + "Debe tener las líneas usuario=... y clave=... (contraseña de aplicación de Gmail).\n"
+                        + "Los pasos están en docs/CORREO_GMAIL.md");
+            }
+            throw new Exception("El archivo " + archivo.toAbsolutePath() + " existe, pero le falta la línea "
+                    + "usuario=... o la línea clave=... (una por línea, escritas exactamente así).");
         }
     }
 
@@ -83,6 +100,9 @@ public class CorreoService {
      * @param nombreAdjunto  nombre con el que le llega al cliente, por ejemplo "comprobante-venta-5.pdf"
      */
     public void enviar(String para, String asunto, String texto, Path adjunto, String nombreAdjunto) throws Exception {
+        Thread.currentThread().setContextClassLoader(CorreoService.class.getClassLoader());
+        registrarManejadores();
+
         Properties props = new Properties();
         props.put("mail.smtp.host", host);
         props.put("mail.smtp.port", String.valueOf(puerto));
@@ -131,7 +151,16 @@ public class CorreoService {
         } catch (SendFailedException e) {
             throw new Exception("No se pudo enviar el correo a " + para + ": " + e.getMessage());
         } catch (MessagingException e) {
-            throw new Exception("No se pudo enviar el correo. Revisa tu conexión a internet. (" + e.getMessage() + ")");
+            e.printStackTrace();   // el detalle técnico completo queda en la ventana negra si se ejecuta con java -jar
+            Throwable causa = e;
+            while (causa.getCause() != null) causa = causa.getCause();
+            if (causa instanceof UnknownHostException || causa instanceof ConnectException
+                    || causa instanceof SocketTimeoutException || causa instanceof NoRouteToHostException) {
+                throw new Exception("No se pudo conectar con Gmail. Revisa tu conexión a internet y que la red permita el puerto "
+                        + puerto + " (algunas redes de universidades lo bloquean; prueba con otra red).");
+            }
+            throw new Exception("No se pudo enviar el correo.\nDetalle técnico: "
+                    + causa.getClass().getSimpleName() + ": " + causa.getMessage());
         } catch (IOException e) {
             throw new Exception("No se pudo leer el archivo a adjuntar: " + e.getMessage());
         }
@@ -139,13 +168,41 @@ public class CorreoService {
 
     // ------------------------------------------------------------------ configuración
 
+    // Carpetas donde se busca correo.properties: desde donde se ejecuta el programa, junto al .jar (o a las clases)
+    // y las dos carpetas de arriba (si el .jar está en target/, así se encuentra el archivo junto al pom.xml)
+    private static List<Path> carpetasDeBusqueda() {
+        List<Path> carpetas = new ArrayList<>();
+        carpetas.add(Path.of("").toAbsolutePath());
+        try {
+            Path programa = Path.of(CorreoService.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            Path carpeta = Files.isDirectory(programa) ? programa : programa.getParent();
+            for (int i = 0; i < 3 && carpeta != null; i++, carpeta = carpeta.getParent()) {
+                if (!carpetas.contains(carpeta)) carpetas.add(carpeta);
+            }
+        } catch (Exception e) {
+            // si no se puede saber dónde está el programa, solo se usa la carpeta actual
+        }
+        return carpetas;
+    }
+
+    // En Windows el Bloc de notas suele guardar "correo.properties.txt" sin que se vea el .txt: también se acepta
+    private static Path buscarArchivo() {
+        for (Path carpeta : carpetasDeBusqueda()) {
+            for (String nombre : new String[]{ARCHIVO, ARCHIVO + ".txt"}) {
+                Path archivo = carpeta.resolve(nombre);
+                if (Files.exists(archivo)) return archivo;
+            }
+        }
+        return null;
+    }
+
     private static Properties leerConfiguracion() throws IOException {
         Properties p = new Properties();
-        Path archivo = Path.of(ARCHIVO);
-        if (Files.exists(archivo)) {
-            try (var in = Files.newBufferedReader(archivo, StandardCharsets.UTF_8)) {
-                p.load(in);
-            }
+        Path archivo = buscarArchivo();
+        if (archivo != null) {
+            String texto = Files.readString(archivo, StandardCharsets.UTF_8);
+            if (texto.startsWith("\uFEFF")) texto = texto.substring(1);   // marca invisible que agrega el Bloc de notas
+            p.load(new StringReader(texto));
         }
         return p;
     }
@@ -154,11 +211,30 @@ public class CorreoService {
     private static String valor(Properties p, String clave, String variableDeEntorno) {
         String v = p.getProperty(clave);
         if (v == null || v.isBlank()) v = System.getenv(variableDeEntorno);
-        return v == null || v.isBlank() ? null : v.trim();
+        if (v != null) v = v.replace("\"", "").trim();     // por si escribieron la clave entre comillas
+        return v == null || v.isBlank() ? null : v;
     }
 
     // Google muestra la contraseña de aplicación en grupos de 4 letras separados por espacios
     private static String quitarEspacios(String s) {
         return s == null ? "" : s.replace(" ", "");
+    }
+
+    // Dentro de un .jar único (todas las librerías juntas) puede perderse la lista de "manejadores" de Jakarta Activation
+    // y el envío falla con "no object DCH for MIME type multipart/mixed". Se registran a mano (solo si existen).
+    private static void registrarManejadores() {
+        try {
+            Class.forName("org.eclipse.angus.mail.handlers.multipart_mixed");
+            String base = "x-java-content-handler=org.eclipse.angus.mail.handlers.";
+            MailcapCommandMap mapa = (MailcapCommandMap) CommandMap.getDefaultCommandMap();
+            mapa.addMailcap("text/plain;; " + base + "text_plain");
+            mapa.addMailcap("text/html;; " + base + "text_html");
+            mapa.addMailcap("text/xml;; " + base + "text_xml");
+            mapa.addMailcap("message/rfc822;; " + base + "message_rfc822");
+            mapa.addMailcap("multipart/*;; " + base + "multipart_mixed; x-java-fallback-entry=true");
+            CommandMap.setDefaultCommandMap(mapa);
+        } catch (Exception | LinkageError e) {
+            // si no se puede, se sigue con la configuración normal
+        }
     }
 }

@@ -17,7 +17,7 @@ centro educativo (por ejemplo, una cuenta de la universidad): usa una cuenta per
 
 ## 2. Crear el archivo correo.properties
 
-Copia `correo.properties.ejemplo` como `correo.properties` **en la carpeta del proyecto, junto al pom.xml**, y escribe tus datos:
+Copia `correo.properties.ejemplo` como `correo.properties` **en la carpeta del proyecto, junto al pom.xml** (si usas el .jar, también se encuentra ahí, o puedes dejarlo junto al .jar), y escribe tus datos:
 
     usuario=micuenta@gmail.com
     clave=abcd efgh ijkl mnop
@@ -39,7 +39,9 @@ El correo sale de la cuenta de Gmail configurada; ahí mismo aparece en *Enviado
 
 | Mensaje | Qué hacer |
 | --- | --- |
-| Falta configurar el correo | Falta crear `correo.properties` junto al pom.xml (paso 2). |
+| No se encontró el archivo correo.properties en esta carpeta | El mensaje muestra la carpeta donde busca: crea el archivo **ahí**, junto al pom.xml. En NetBeans, al ejecutar el proyecto, es la carpeta del proyecto. En Windows, activa "Extensiones de nombre de archivo" para comprobar que no se llame `correo.properties.txt` (también se acepta, pero conviene que quede sin `.txt`). |
+| No se pudo enviar el correo. Detalle técnico: ... | Copia ese detalle completo y compártelo: dice la causa exacta. Si ejecutas con `java -jar` desde `cmd`, en esa ventana sale aún más información. |
+| El archivo existe, pero le falta usuario o clave | Cada dato va en su propia línea y con esos nombres exactos: `usuario=...` y `clave=...`. |
 | Gmail rechazó el usuario o la contraseña | Se usó la contraseña normal en vez de la de aplicación, o está mal copiada. Crea otra en el paso 1. |
 | No se pudo enviar... revisa tu conexión | No hay internet o la red bloquea el puerto 587 (algunas redes de universidades lo bloquean). Prueba con otra red. |
 | El cliente no tiene un correo válido | Edita el cliente en el módulo Clientes y escribe su correo. |

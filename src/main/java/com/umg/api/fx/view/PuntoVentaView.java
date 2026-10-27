@@ -366,7 +366,9 @@ public class PuntoVentaView extends HBox implements Recargable {
                 (ventas v) -> {
                     cobrando.set(false);
                     carrito.clear();
-                    Ui.info("Venta #" + v.getId_venta() + " registrada.\nTotal cobrado: " + Ui.dinero(v.getTotal_venta()));
+                    String aviso = CorreoService.configurado() ? ""
+                            : "\n\nNo se enviará el comprobante por correo: falta crear correo.properties (ver docs/CORREO_GMAIL.md).";
+                    Ui.info("Venta #" + v.getId_venta() + " registrada.\nTotal cobrado: " + Ui.dinero(v.getTotal_venta()) + aviso);
                     recargar();
                     enviarComprobante(v.getId_venta(), clienteVenta);
                 },
