@@ -1,0 +1,9 @@
+# Copia este archivo como  correo.properties  (en esta misma carpeta, junto al pom.xml) y llena tus datos.
+# correo.properties NO se sube a GitHub: tiene tu contraseña de aplicación.
+
+# Tu cuenta de Gmail completa
+usuario=micuenta@gmail.com
+
+# La contraseña de APLICACIÓN de 16 letras que genera Google (no tu contraseña normal).
+# Puedes pegarla con o sin espacios.
+clave=abcd efgh ijkl mnop

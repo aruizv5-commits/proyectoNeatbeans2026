@@ -12,14 +12,19 @@ public class ComprobanteService {
         private final int numero;
         private final BigDecimal total;
         private final List<Map<String,Object>> lineas;
-        private final String fecha, vendedor, cliente, telefono, observaciones;
+        private final String fecha, vendedor, cliente, telefono, observaciones, correo;
         public Documento(int numero, BigDecimal total, List<Map<String,Object>> lineas) {
             this(numero,total,lineas,"No disponible","No disponible","No disponible","No disponible","Sin observaciones.");
         }
         public Documento(int numero, BigDecimal total, List<Map<String,Object>> lineas,
                 String fecha, String vendedor, String cliente, String telefono, String observaciones) {
+            this(numero,total,lineas,fecha,vendedor,cliente,telefono,observaciones,"");
+        }
+        public Documento(int numero, BigDecimal total, List<Map<String,Object>> lineas,
+                String fecha, String vendedor, String cliente, String telefono, String observaciones, String correo) {
             this.numero=numero;this.total=total;this.lineas=lineas;
             this.fecha=fecha;this.vendedor=vendedor;this.cliente=cliente;this.telefono=telefono;this.observaciones=observaciones;
+            this.correo=correo;
         }
         public int numero(){return numero;}
         public BigDecimal total(){return total;}
@@ -29,6 +34,7 @@ public class ComprobanteService {
         public String cliente(){return cliente;}
         public String telefono(){return telefono;}
         public String observaciones(){return observaciones;}
+        public String correo(){return correo;}
     }
     public Documento cargar(int id,Integer vendedorPermitido)throws Exception {
         if(id<1)throw new IllegalArgumentException("Número de venta inválido.");
@@ -76,7 +82,8 @@ public class ComprobanteService {
                 .format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
         String nombre=(cliente.path("nombre").asText("")+" "+cliente.path("apellido").asText("")).trim();
         return new Documento(id,importe(venta,"total_venta"),filas,fecha,vendedor,nombre,
-                cliente.path("telefono").asText("No registrado"),venta.path("observaciones").asText("Precios finales registrados en la venta."));
+                cliente.path("telefono").asText("No registrado"),venta.path("observaciones").asText("Precios finales registrados en la venta."),
+                cliente.path("correo").asText("").trim());
     }
     private JsonNode consultar(String ruta)throws Exception {
         JsonNode n=HttpJson.get(ruta);
