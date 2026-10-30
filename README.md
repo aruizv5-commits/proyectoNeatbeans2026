@@ -68,3 +68,6 @@ Los comprobantes usan nombres actuales de los catálogos; eliminar un cliente/co
 No incluir contraseñas, archivos .env ni credenciales en Git. La clase JDBC heredada solo lee variables si alguien la usa explícitamente; JavaFX normal consume la API. Si una contraseña apareció en versiones anteriores o capturas, cambiarla en el proveedor correspondiente.
 
 Cada tarea de nube ya está aislada: usar el checkout existente; no es necesario crear worktrees para preparar este proyecto.
+
+Video de la API https://youtu.be/FOo-9lubS0A
+
